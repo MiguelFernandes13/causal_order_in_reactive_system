@@ -79,12 +79,14 @@ public class CausalOperator<T> implements ObservableOperator<T, CausalMessage<T>
 
             @Override
             public void onError(@NonNull Throwable e) {
-                down.onError(e); // FIXME
+                down.onError(e); 
             }
 
             @Override
             public void onComplete() {
-                down.onComplete(); // FIXME
+                //if (!q.isEmpty())
+                //    onError(new IllegalArgumentException("Queue is not empty"));
+                down.onComplete();
             }
         };
     }
