@@ -2,6 +2,7 @@ package causalop;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Set;
@@ -61,10 +62,12 @@ public class CausalOperator<T> implements ObservableOperator<T, CausalMessage<T>
                     boolean repeat = true;
                     while (repeat){
                         repeat = false;
-                        for (CausalMessage<T> m2 : q) {
+                        Iterator<CausalMessage<T>> it = q.iterator();
+                        while (it.hasNext()){
+                            CausalMessage<T> m2 = it.next();
                             if (isCausal(m2)){
                                 v[m2.j]++;
-                                q.remove(m2);
+                                it.remove();
                                 down.onNext(m2.payload);
                                 repeat = true;
                                 break;
@@ -84,8 +87,8 @@ public class CausalOperator<T> implements ObservableOperator<T, CausalMessage<T>
 
             @Override
             public void onComplete() {
-                //if (!q.isEmpty())
-                //    onError(new IllegalArgumentException("Queue is not empty"));
+                if (!q.isEmpty())
+                    onError(new IllegalArgumentException("Queue is not empty"));
                 down.onComplete();
             }
         };
