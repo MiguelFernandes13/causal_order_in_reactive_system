@@ -1,24 +1,21 @@
 package causalop;
 
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.Queue;
 import java.util.Set;
-import java.util.SortedSet;
 import java.util.TreeSet;
 
-import io.reactivex.rxjava3.annotations.NonNull;
-import io.reactivex.rxjava3.core.ObservableOperator;
-import io.reactivex.rxjava3.core.Observer;
-import io.reactivex.rxjava3.observers.DisposableObserver;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 
-public class CausalOperator<T> implements ObservableOperator<T, CausalMessage<T>> {
+import io.reactivex.rxjava3.annotations.NonNull;
+import io.reactivex.rxjava3.core.FlowableOperator;
+
+public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
     private final int n;
     private int[] v;
     private Set<CausalMessage<T>> q;
-
+    private Subscription subscription;
+    
     public CausalOperator(int n) {
         this.n = n;
         this.v = new int[n];
@@ -52,13 +49,20 @@ public class CausalOperator<T> implements ObservableOperator<T, CausalMessage<T>
     }
 
     @Override
-    public @NonNull Observer<? super CausalMessage<T>> apply(@NonNull Observer<? super T> down) throws Throwable {
-        return new DisposableObserver<CausalMessage<T>>() {
+    public @NonNull Subscriber<? super @NonNull CausalMessage<T>> apply(
+            @NonNull Subscriber<? super @NonNull T> child) throws Throwable {
+        return new Subscriber<CausalMessage<T>>() {
             @Override
-            public void onNext(@NonNull CausalMessage<T> m) {
+            public void onSubscribe(@NonNull Subscription parent) {
+                subscription = parent;
+                child.onSubscribe(parent);
+            }
+
+            @Override
+            public void onNext(@NonNull CausalMessage<T> m) {     
                 if (isCausal(m)){
                     v[m.j]++;
-                    down.onNext(m.payload);
+                    child.onNext(m.payload);
                     boolean repeat = true;
                     while (repeat){
                         repeat = false;
@@ -68,29 +72,33 @@ public class CausalOperator<T> implements ObservableOperator<T, CausalMessage<T>
                             if (isCausal(m2)){
                                 v[m2.j]++;
                                 it.remove();
-                                down.onNext(m2.payload);
+                                child.onNext(m2.payload);
                                 repeat = true;
                                 break;
                             }
                         }
                     }
                 }
-                else if (!isDuplicated(m))
+                else if (!isDuplicated(m)){
                     q.add(m);
-
+                    subscription.request(1);
+                }
+                else
+                    subscription.request(1);
             }
 
             @Override
             public void onError(@NonNull Throwable e) {
-                down.onError(e); 
+                child.onError(e);
             }
 
             @Override
             public void onComplete() {
                 if (!q.isEmpty())
                     onError(new IllegalArgumentException("Queue is not empty"));
-                down.onComplete();
+                child.onComplete();
             }
         };
     }
+
 }

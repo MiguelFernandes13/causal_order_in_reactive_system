@@ -16,13 +16,15 @@ public class CausalMessage<T> implements Comparable<CausalMessage<T>> {
             CausalMessage<T> m = (CausalMessage<T>) arg0;
             if (m.j == j) {
                 for (int i = 0; i < v.length; i++) {
-                    if (m.v[i] != v[i])
-                        return 0;
+                    if (m.v[i] > v[i])
+                        return 1;
+                    else if (m.v[i] < v[i])
+                        return -1;
                 }
-                return 1;
+                return 0;
             }
         }
-        return 0;        
+        return 1;        
     }
 
     
