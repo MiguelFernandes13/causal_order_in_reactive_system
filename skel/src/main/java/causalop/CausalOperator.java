@@ -1,6 +1,7 @@
 package causalop;
 
 import java.util.Iterator;
+import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -10,11 +11,14 @@ import org.reactivestreams.Subscription;
 import io.reactivex.rxjava3.annotations.NonNull;
 import io.reactivex.rxjava3.core.FlowableOperator;
 
+import causalop.CausalQueue;
+
 public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
     private final int n;
     private int[] v;
     private Set<CausalMessage<T>> q;
     private Subscription subscription;
+    private  CausalQueue queues;
     
     public CausalOperator(int n) {
         this.n = n;
@@ -23,6 +27,7 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
             v[i] = 0;
         }
         this.q = new TreeSet<>();
+        this.queues = new CausalQueue(n);
     }
 
     public boolean isCausal(CausalMessage<T> m) {
@@ -48,6 +53,31 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
         return duplicated;
     }
 
+    public boolean sendFromQueue(int j, Subscriber<? super T> child) {
+        try {
+            CausalMessage<T> message = this.queues.dequeueMessage(j);
+            if (isCausal(message)) {
+                child.onNext(message.payload);
+                this.v[message.j]++;
+                return true;
+            } else {
+                this.queues.addMessage(message);
+                return false;
+            }
+        } catch (NoSuchElementException e) {
+            return false;
+        }
+    }
+    public void sendFromQueues(Subscriber<? super T> child) {
+        int noCausal = 0;
+        for (int i = 0; noCausal < n; i++) {
+            int j = i%n;
+            while(sendFromQueue(j, child))
+                noCausal = 0;
+            noCausal += 1;
+        }
+    }
+
     @Override
     public @NonNull Subscriber<? super @NonNull CausalMessage<T>> apply(
             @NonNull Subscriber<? super @NonNull T> child) throws Throwable {
@@ -63,24 +93,10 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
                 if (isCausal(m)){
                     v[m.j]++;
                     child.onNext(m.payload);
-                    boolean repeat = true;
-                    while (repeat){
-                        repeat = false;
-                        Iterator<CausalMessage<T>> it = q.iterator();
-                        while (it.hasNext()){
-                            CausalMessage<T> m2 = it.next();
-                            if (isCausal(m2)){
-                                v[m2.j]++;
-                                it.remove();
-                                child.onNext(m2.payload);
-                                repeat = true;
-                                break;
-                            }
-                        }
-                    }
+                    sendFromQueues(child);
                 }
                 else if (!isDuplicated(m)){
-                    q.add(m);
+                    queues.addMessage(m);
                     subscription.request(1);
                 }
                 else
@@ -94,7 +110,7 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
 
             @Override
             public void onComplete() {
-                if (!q.isEmpty())
+                if (!queues.allEmpty())
                     onError(new IllegalArgumentException("Queue is not empty"));
                 child.onComplete();
             }
