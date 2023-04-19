@@ -1,10 +1,9 @@
 package causalop;
 
-import java.util.Iterator;
-import java.util.NoSuchElementException;
-import java.util.Set;
-import java.util.TreeSet;
+import java.nio.BufferOverflowException;
+import java.util.*;
 
+import io.reactivex.rxjava3.core.FlowableSubscriber;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 
@@ -16,18 +15,37 @@ import causalop.CausalQueue;
 public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
     private final int n;
     private int[] v;
-    private Set<CausalMessage<T>> q;
+    private List<T> delivered;
     private Subscription subscription;
     private  CausalQueue queues;
-    
+    private long myCredits;
+    private long childCredits;
+
     public CausalOperator(int n) {
         this.n = n;
         this.v = new int[n];
         for (int i = 0; i < n; i++) {
             v[i] = 0;
         }
-        this.q = new TreeSet<>();
+        this.delivered = new ArrayList<>();
         this.queues = new CausalQueue(n);
+        this.myCredits = 501;
+        this.childCredits = 0;
+    }
+
+    public CausalOperator(int n, long bufferSize) {
+        this.n = n;
+        this.v = new int[n];
+        for (int i = 0; i < n; i++) {
+            v[i] = 0;
+        }
+        this.delivered = new ArrayList<>();
+        this.queues = new CausalQueue(n);
+        // Buffer size is supposed to be the allowed maximum. If an insertion is made that makes the queue size bufferSize + 1
+        // then an error is thrown. Thus we give bufferSize + 1 credits to give the opportunity to the parent stream to
+        // flush the queue with a new message. If it adds a message to the quarantine then it call onError.
+        this.myCredits = bufferSize + 1;
+        this.childCredits = 0;
     }
 
     public boolean isCausal(CausalMessage<T> m) {
@@ -57,7 +75,8 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
         try {
             CausalMessage<T> message = this.queues.dequeueMessage(j);
             if (isCausal(message)) {
-                child.onNext(message.payload);
+                delivered.add(message.payload);
+                myCredits++;
                 this.v[message.j]++;
                 return true;
             } else {
@@ -78,29 +97,58 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
         }
     }
 
+
     @Override
     public @NonNull Subscriber<? super @NonNull CausalMessage<T>> apply(
             @NonNull Subscriber<? super @NonNull T> child) throws Throwable {
+
         return new Subscriber<CausalMessage<T>>() {
+
             @Override
             public void onSubscribe(@NonNull Subscription parent) {
                 subscription = parent;
-                child.onSubscribe(parent);
+                subscription.request(myCredits);
+                child.onSubscribe(new Subscription() {
+                    @Override
+                    public void request(long l) {
+                        childCredits += l;
+                    }
+
+                    @Override
+                    public void cancel() {
+                        subscription.cancel();
+                    }
+                });
             }
 
             @Override
-            public void onNext(@NonNull CausalMessage<T> m) {     
+            public void onNext(@NonNull CausalMessage<T> m) {
                 if (isCausal(m)){
                     v[m.j]++;
-                    child.onNext(m.payload);
+                    delivered.add(m.payload);
                     sendFromQueues(child);
                 }
                 else if (!isDuplicated(m)){
                     queues.addMessage(m);
+                    myCredits--;
+                }
+                else {
                     subscription.request(1);
                 }
-                else
+
+
+                while(childCredits > 0 && delivered.size() > 0) {
+                    T payload = delivered.remove(0);
+                    child.onNext(payload);
+                    childCredits--;
                     subscription.request(1);
+                }
+
+                if (myCredits <= 0) {
+                    onError(new MessageOverflowException("Amount of Messages waiting to be delivered and in quarantine" +
+                            " exceeded the maximum amount."));
+                }
+
             }
 
             @Override
