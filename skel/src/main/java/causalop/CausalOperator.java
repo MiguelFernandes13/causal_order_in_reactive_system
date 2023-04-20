@@ -76,7 +76,6 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
             CausalMessage<T> message = this.queues.dequeueMessage(j);
             if (isCausal(message)) {
                 delivered.add(message.payload);
-                myCredits++;
                 this.v[message.j]++;
                 return true;
             } else {
@@ -126,6 +125,7 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
                 if (isCausal(m)){
                     v[m.j]++;
                     delivered.add(m.payload);
+                    myCredits--;
                     sendFromQueues(child);
                 }
                 else if (!isDuplicated(m)){
@@ -139,6 +139,7 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
 
                 while(childCredits > 0 && delivered.size() > 0) {
                     T payload = delivered.remove(0);
+                    myCredits++;
                     child.onNext(payload);
                     childCredits--;
                     subscription.request(1);
