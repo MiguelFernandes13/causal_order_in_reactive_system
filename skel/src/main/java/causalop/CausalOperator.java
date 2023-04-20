@@ -1,6 +1,7 @@
 package causalop;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -14,8 +15,8 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
     private List<T> delivered;
     private Subscription subscription;
     private CausalQueues queues;
-    private long myCredits;
-    private long childCredits;
+    private AtomicLong myCredits;
+    private AtomicLong childCredits;
 
     public CausalOperator(int n) {
         this.n = n;
@@ -25,8 +26,8 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
         }
         this.delivered = new ArrayList<>();
         this.queues = new CausalQueues(n);
-        this.myCredits = 501;
-        this.childCredits = 0;
+        this.myCredits = new AtomicLong(501);
+        this.childCredits = new AtomicLong(0);
     }
 
     public CausalOperator(int n, long bufferSize) {
@@ -40,8 +41,8 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
         // Buffer size is supposed to be the allowed maximum. If an insertion is made that makes the queue size bufferSize + 1
         // then an error is thrown. Thus we give bufferSize + 1 credits to give the opportunity to the parent stream to
         // flush the queue with a new message. If it adds a message to the quarantine then it call onError.
-        this.myCredits = bufferSize + 1;
-        this.childCredits = 0;
+        this.myCredits = new AtomicLong(bufferSize + 1);
+        this.childCredits = new AtomicLong(0);
     }
 
     public boolean isCausal(CausalMessage<T> m) {
@@ -102,18 +103,8 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
             @Override
             public void onSubscribe(@NonNull Subscription parent) {
                 subscription = parent;
-                subscription.request(myCredits);
-                child.onSubscribe(new Subscription() {
-                    @Override
-                    public void request(long l) {
-                        childCredits += l;
-                    }
-
-                    @Override
-                    public void cancel() {
-                        subscription.cancel();
-                    }
-                });
+                subscription.request(myCredits.get());
+                child.onSubscribe(new MySubscription<>(child, childCredits, myCredits, subscription, delivered));
             }
 
             @Override
@@ -121,27 +112,27 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
                 if (isCausal(m)){
                     v[m.j]++;
                     delivered.add(m.payload);
-                    myCredits--;
+                    myCredits.decrementAndGet();
                     sendFromQueues();
                 }
                 else if (!isDuplicated(m)){
                     queues.queueMessage(m);
-                    myCredits--;
+                    myCredits.decrementAndGet();
                 }
                 else {
                     subscription.request(1);
                 }
 
 
-                while(childCredits > 0 && delivered.size() > 0) {
+                while(childCredits.get() > 0 && delivered.size() > 0) {
                     T payload = delivered.remove(0);
-                    myCredits++;
+                    myCredits.incrementAndGet();
                     child.onNext(payload);
-                    childCredits--;
+                    childCredits.decrementAndGet();
                     subscription.request(1);
                 }
 
-                if (myCredits <= 0) {
+                if (myCredits.get() <= 0 && delivered.size() == 0) {
                     onError(new MessageOverflowException("Amount of Messages waiting to be delivered and in quarantine" +
                             " exceeded the maximum amount."));
                 }

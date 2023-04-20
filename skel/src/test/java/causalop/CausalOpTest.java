@@ -137,4 +137,27 @@ public class CausalOpTest {
                 .toList().blockingGet();
 
     }
+
+    @Test(expected = causalop.MessageOverflowException.class)
+    public void messagesInDeliveredOverflow(){
+        var l = Flowable.interval(10, TimeUnit.MILLISECONDS)
+                .take(1001)
+                .map(i -> {
+                    System.out.println("Emmiting " + i);
+                    return new CausalMessage<String>("a"+i, 1, 0, Math.toIntExact(i));
+                })
+                .onBackpressureBuffer()
+                .lift(new CausalOperator<String>(2, 500))
+                .observeOn(Schedulers.computation())
+                .subscribe(i -> {
+                    Thread.sleep(50);
+                    System.out.println("Received " + i);
+                });
+                try {
+                    Thread.sleep(100000000);
+                } catch (InterruptedException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                }
+    }
 }
