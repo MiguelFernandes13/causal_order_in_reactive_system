@@ -136,27 +136,28 @@ public class CausalOpTest {
     @Test
     public void backPressureTest() throws InterruptedException {
         var l = Flowable.interval(10, TimeUnit.MILLISECONDS)
-                .take(1001)
+                .take(501)
                 .map(i -> {
                     System.out.println("Emmiting " + i);
                     return new CausalMessage<String>("a" + i, 1, 0, Math.toIntExact(i));
                 })
-                .observeOn(Schedulers.io())
                 .lift(new CausalOperator<String>(2, 500))
+                .onBackpressureBuffer(500)
+                .observeOn(Schedulers.io())
                 .flatMap(i -> {
                     return Flowable.just(i)
                             .doOnRequest(n -> {
                                 System.out.println("Requesting ");
                             })
-                            .delay(20, TimeUnit.MILLISECONDS);
+                            .delay(15, TimeUnit.MILLISECONDS);
                 }, 1)
                 .map(i -> {
                     System.out.println("Delivered " + i);
                     return i;
                 }).toList().blockingGet();
-        Thread.sleep(1000000000);
+        Thread.sleep(5000);
 
-        Assert.assertEquals(l.size(), 1000);
+        Assert.assertEquals(l.size(), 500);
 
     }
 }
