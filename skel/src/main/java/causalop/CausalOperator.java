@@ -1,23 +1,19 @@
 package causalop;
 
-import java.nio.BufferOverflowException;
 import java.util.*;
 
-import io.reactivex.rxjava3.core.FlowableSubscriber;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 
 import io.reactivex.rxjava3.annotations.NonNull;
 import io.reactivex.rxjava3.core.FlowableOperator;
 
-import causalop.CausalQueue;
-
 public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
     private final int n;
     private int[] v;
     private List<T> delivered;
     private Subscription subscription;
-    private  CausalQueue queues;
+    private CausalQueues queues;
     private long myCredits;
     private long childCredits;
 
@@ -28,7 +24,7 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
             v[i] = 0;
         }
         this.delivered = new ArrayList<>();
-        this.queues = new CausalQueue(n);
+        this.queues = new CausalQueues(n);
         this.myCredits = 501;
         this.childCredits = 0;
     }
@@ -40,7 +36,7 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
             v[i] = 0;
         }
         this.delivered = new ArrayList<>();
-        this.queues = new CausalQueue(n);
+        this.queues = new CausalQueues(n);
         // Buffer size is supposed to be the allowed maximum. If an insertion is made that makes the queue size bufferSize + 1
         // then an error is thrown. Thus we give bufferSize + 1 credits to give the opportunity to the parent stream to
         // flush the queue with a new message. If it adds a message to the quarantine then it call onError.
@@ -71,7 +67,7 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
         return duplicated;
     }
 
-    public boolean sendFromQueue(int j, Subscriber<? super T> child) {
+    public boolean sendFromQueue(int j) {
         try {
             CausalMessage<T> message = this.queues.dequeueMessage(j);
             if (isCausal(message)) {
@@ -79,18 +75,18 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
                 this.v[message.j]++;
                 return true;
             } else {
-                this.queues.addMessage(message);
+                this.queues.queueMessage(message);
                 return false;
             }
         } catch (NoSuchElementException e) {
             return false;
         }
     }
-    public void sendFromQueues(Subscriber<? super T> child) {
+    public void sendFromQueues() {
         int noCausal = 0;
         for (int i = 0; noCausal < n; i++) {
             int j = i%n;
-            while(sendFromQueue(j, child))
+            while(sendFromQueue(j))
                 noCausal = 0;
             noCausal += 1;
         }
@@ -126,10 +122,10 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>>{
                     v[m.j]++;
                     delivered.add(m.payload);
                     myCredits--;
-                    sendFromQueues(child);
+                    sendFromQueues();
                 }
                 else if (!isDuplicated(m)){
-                    queues.addMessage(m);
+                    queues.queueMessage(m);
                     myCredits--;
                 }
                 else {

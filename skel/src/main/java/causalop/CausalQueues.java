@@ -2,15 +2,15 @@ package causalop;
 
 import java.util.*;
 
-public class CausalQueue<T> {
+public class CausalQueues<T> {
     private List<Set<CausalMessage<T>>> queues;
-    public CausalQueue(int n) {
+    public CausalQueues(int n) {
         this.queues = new ArrayList<>(n);
         for (int i = 0; i < n; i++)
             this.queues.add(new TreeSet<>());
     }
 
-    public void addMessage(CausalMessage<T> message) {
+    public void queueMessage(CausalMessage<T> message) {
         Set<CausalMessage<T>> q;
         q = this.queues.get(message.j);
         q.add(message);
