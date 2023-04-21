@@ -34,8 +34,6 @@ public class MySubscription<T> implements Subscription {
                 T payload = delivered.remove(0);
                 myCredits.incrementAndGet();
                 child.onNext(payload);
-                System.out.println("Delivered from request: " + payload);
-                System.out.println("Delivered size: " + delivered.size());
                 childCredits.decrementAndGet();
                 subscription.request(1);
             }

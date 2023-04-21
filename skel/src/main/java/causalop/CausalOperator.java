@@ -135,7 +135,6 @@ public class CausalOperator<T> implements FlowableOperator<T, CausalMessage<T>> 
                             T payload = delivered.remove(0);
                             myCredits.incrementAndGet();
                             child.onNext(payload);
-                            System.out.println("Delivered from onNext: " + payload);
                             childCredits.decrementAndGet();
                             subscription.request(1);
                         }
